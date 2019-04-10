@@ -1,4 +1,4 @@
-"""
+"""Discovering hidden factors of variation in deep networks
 
 Based on:
 https://github.com/Lasagne/Lasagne/blob/highway_example/examples/Hidden%20factors.ipynb
@@ -7,7 +7,6 @@ import time
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import gridspec
 import tensorflow as tf
 
 print(tf.__version__)
@@ -26,9 +25,9 @@ x_test = x_test.astype('float32') / 255.
 x_train = x_train.reshape((-1, 28 * 28))
 x_test = x_test.reshape((-1, 28 * 28))
 
-batch_size = 100
+batch_size = 256
 # create the database iterator
-train_dataset = tf.data.Dataset.from_tensor_slices((x_train,y_train))
+train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
 train_dataset = train_dataset.shuffle(buffer_size=1024)
 train_dataset = train_dataset.batch(batch_size)
 
@@ -71,7 +70,7 @@ def xcov_loss_fn(latent, observed, batch_size):
     return xcov_loss
 
 
-cat_loss_fn = tf.keras.losses.CategoricalCrossentropy()
+cat_loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
 
 alpha = 1.0
 beta = 10.0
@@ -79,6 +78,8 @@ gamma = 10.0
 
 # Optimizer
 optimizer = tf.keras.optimizers.Adadelta(lr=1.0, rho=0.95, epsilon=1e-6)
+
+
 # optimizer = tf.keras.optimizers.Adam()
 
 # Training
@@ -90,11 +91,10 @@ def train_on_batch(batch_x, batch_y):
         batch_reconstruction = decoder([batch_latent, batch_observed])
 
         recon_loss = alpha * mse_loss_fn(batch_x, batch_reconstruction)
-        cat_loss = beta * cat_loss_fn(tf.one_hot(batch_y,n_class), batch_observed)
+        cat_loss = beta * cat_loss_fn(tf.one_hot(batch_y, n_class), batch_observed)
         xcov_loss = gamma * xcov_loss_fn(batch_latent, batch_observed, tf.cast(tf.shape(batch_x)[0], tf.float32))
 
         ae_loss = recon_loss + cat_loss + xcov_loss
-
 
     gradients = tape.gradient(ae_loss, encoder.trainable_variables + decoder.trainable_variables)
     optimizer.apply_gradients(zip(gradients, encoder.trainable_variables + decoder.trainable_variables))
@@ -109,20 +109,18 @@ for epoch in range(n_epochs):
     epoch_cat_loss_avg = tf.metrics.Mean()
     epoch_xcov_loss_avg = tf.metrics.Mean()
 
-
     for batch, (batch_x, batch_y) in enumerate(train_dataset):
         (r_loss, c_loss, x_loss) = train_on_batch(batch_x, batch_y)
         epoch_recon_loss_avg(r_loss)
         epoch_cat_loss_avg(c_loss)
         epoch_xcov_loss_avg(x_loss)
 
-
     epoch_time = time.time() - start
     print('EPOCH: {}, TIME: {}, ETA: {},  R_LOSS: {},  C_LOSS: {},  X_LOSS: {}'.format(epoch + 1, epoch_time,
-                                                              epoch_time * (n_epochs - epoch),
-                                                                 epoch_recon_loss_avg.result(),
-                                                                 epoch_cat_loss_avg.result(),
-                                                                 epoch_xcov_loss_avg.result()))
+                                                                                       epoch_time * (n_epochs - epoch),
+                                                                                       epoch_recon_loss_avg.result(),
+                                                                                       epoch_cat_loss_avg.result(),
+                                                                                       epoch_xcov_loss_avg.result()))
 
 z_test_list = []
 for batch, (batch_x, batch_y) in enumerate(test_dataset):
@@ -132,9 +130,6 @@ z_test = np.asarray(z_test_list)
 plt.figure()
 plt.scatter(z_test[:, 0], z_test[:, 1], alpha=0.1)
 plt.show()
-
-
-
 
 ys = np.repeat(np.arange(10), 9).astype('int32')
 zs = np.tile(np.linspace(-0.5, 0.5, 9), 10).astype('float32')
@@ -151,4 +146,3 @@ plt.show()
 im2 = reconstructions_z2.reshape(10, 9, 28, 28).transpose(1, 2, 0, 3).reshape(9 * 28, 10 * 28)
 plt.imshow(im2, cmap=plt.cm.gray)
 plt.show()
-
