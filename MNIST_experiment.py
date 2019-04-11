@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
+print(np.__version__)
 print(tf.__version__)
 
 # Set random seed
@@ -21,46 +22,66 @@ print("Loading data...")
 x_train = x_train.astype('float32') / 255.
 x_test = x_test.astype('float32') / 255.
 
-# flatten the dataset
+# Flatten the dataset
 x_train = x_train.reshape((-1, 28 * 28))
 x_test = x_test.reshape((-1, 28 * 28))
 
 batch_size = 256
-# create the database iterator
+
+# Create the training database iterator
 train_dataset = tf.data.Dataset.from_tensor_slices((x_train, y_train))
 train_dataset = train_dataset.shuffle(buffer_size=1024)
 train_dataset = train_dataset.batch(batch_size)
 
-test_dataset = tf.data.Dataset.from_tensor_slices((x_test, y_test))
-test_dataset = test_dataset.batch(batch_size)
-
 # Building model
 n_class = 10
 input_dim = 784
+z_dim = 2
+
 
 # Encoder
-inputs = tf.keras.Input(shape=(input_dim,))
-x = tf.keras.layers.Dense(500, activation='relu')(inputs)
-x = tf.keras.layers.Dense(500, activation='relu')(x)
-observed = tf.keras.layers.Dense(n_class, activation='softmax')(x)
-latent = tf.keras.layers.Dense(2, activation='linear')(x)
+def make_encoder_model():
+    inputs = tf.keras.Input(shape=(input_dim,), name='Original_input')
+    x = tf.keras.layers.Dense(500, activation='relu')(inputs)
+    x = tf.keras.layers.Dense(500, activation='relu')(x)
+    latent = tf.keras.layers.Dense(z_dim, activation='linear', name='Latent_variables')(x)
+    observed = tf.keras.layers.Dense(n_class, activation='softmax', name='Observed_variables')(x)
 
-encoder = tf.keras.Model(inputs=inputs, outputs=[latent, observed])
+    model = tf.keras.Model(inputs=inputs, outputs=[latent, observed], name='Encoder')
+    return model
+
+
+encoder = make_encoder_model()
+
 
 # Decoder
-inputted_latent = tf.keras.Input(shape=(2,))
-inputted_observed = tf.keras.Input(shape=(n_class,))
+def make_decoder_model():
+    inputted_latent = tf.keras.Input(shape=(z_dim,), name='Latent_variables')
+    inputted_observed = tf.keras.Input(shape=(n_class,), name='Observed_variables')
 
-x = tf.keras.layers.concatenate([inputted_latent, inputted_observed], axis=-1)
-x = tf.keras.layers.Dense(500, activation='relu')(x)
-x = tf.keras.layers.Dense(500, activation='relu')(x)
-reconstruction = tf.keras.layers.Dense(input_dim, activation='linear')(x)
-decoder = tf.keras.Model(inputs=[inputted_latent, inputted_observed], outputs=reconstruction)
+    x = tf.keras.layers.concatenate([inputted_latent, inputted_observed], axis=-1)
+    x = tf.keras.layers.Dense(500, activation='relu')(x)
+    x = tf.keras.layers.Dense(500, activation='relu')(x)
+    reconstruction = tf.keras.layers.Dense(input_dim, activation='linear', name='Reconstruction')(x)
+    model = tf.keras.Model(inputs=[inputted_latent, inputted_observed], outputs=reconstruction, name='Decoder')
+    return model
 
-# Losses
+
+decoder = make_decoder_model()
+
+# Multipliers
+alpha = 1.0
+beta = 10.0
+gamma = 10.0
+
+# Loss functions
+# Reconstruction cost
 mse_loss_fn = tf.keras.losses.MeanSquaredError()
 
+# Supervised cost
+cat_loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
 
+# Unsupervised cross-covariance cost
 def xcov_loss_fn(latent, observed, batch_size):
     latent_centered = latent - tf.reduce_mean(latent, axis=0, keepdims=True)
     observed_centered = observed - tf.reduce_mean(observed, axis=0, keepdims=True)
@@ -70,30 +91,25 @@ def xcov_loss_fn(latent, observed, batch_size):
     return xcov_loss
 
 
-cat_loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
-
-alpha = 1.0
-beta = 10.0
-gamma = 10.0
-
 # Optimizer
 optimizer = tf.keras.optimizers.Adadelta(lr=1.0, rho=0.95, epsilon=1e-6)
 
 
-# optimizer = tf.keras.optimizers.Adam()
-
 # Training
-@tf.function  # Make it fast.
+# Training step
+@tf.function
 def train_on_batch(batch_x, batch_y):
-    # Open a GradientTape.
     with tf.GradientTape() as tape:
+        # Inference
         batch_latent, batch_observed = encoder(batch_x)
         batch_reconstruction = decoder([batch_latent, batch_observed])
 
+        # Loss functions
         recon_loss = alpha * mse_loss_fn(batch_x, batch_reconstruction)
         cat_loss = beta * cat_loss_fn(tf.one_hot(batch_y, n_class), batch_observed)
         xcov_loss = gamma * xcov_loss_fn(batch_latent, batch_observed, tf.cast(tf.shape(batch_x)[0], tf.float32))
 
+        # Final loss function
         ae_loss = recon_loss + cat_loss + xcov_loss
 
     gradients = tape.gradient(ae_loss, encoder.trainable_variables + decoder.trainable_variables)
@@ -101,36 +117,44 @@ def train_on_batch(batch_x, batch_y):
     return recon_loss, cat_loss, xcov_loss
 
 
+# Training loop
 n_epochs = 200
 for epoch in range(n_epochs):
     start = time.time()
 
+    # Functions to calculate epoch's mean performance
     epoch_recon_loss_avg = tf.metrics.Mean()
     epoch_cat_loss_avg = tf.metrics.Mean()
     epoch_xcov_loss_avg = tf.metrics.Mean()
 
     for batch, (batch_x, batch_y) in enumerate(train_dataset):
-        (r_loss, c_loss, x_loss) = train_on_batch(batch_x, batch_y)
-        epoch_recon_loss_avg(r_loss)
-        epoch_cat_loss_avg(c_loss)
-        epoch_xcov_loss_avg(x_loss)
+        recon_loss, cat_loss, xcov_loss = train_on_batch(batch_x, batch_y)
+
+        epoch_recon_loss_avg(recon_loss)
+        epoch_cat_loss_avg(cat_loss)
+        epoch_xcov_loss_avg(xcov_loss)
 
     epoch_time = time.time() - start
-    print('EPOCH: {}, TIME: {}, ETA: {},  R_LOSS: {},  C_LOSS: {},  X_LOSS: {}'.format(epoch + 1, epoch_time,
-                                                                                       epoch_time * (n_epochs - epoch),
-                                                                                       epoch_recon_loss_avg.result(),
-                                                                                       epoch_cat_loss_avg.result(),
-                                                                                       epoch_xcov_loss_avg.result()))
+    print('{:3d}: {:.2f}s ETA: {:.2f}s  Reconstruction cost: {:.4f}  Supervised cost: {:.4f}  XCov cost: {:.4f}'
+          .format(epoch + 1, epoch_time,
+                  epoch_time * (n_epochs - epoch),
+                  epoch_recon_loss_avg.result(),
+                  epoch_cat_loss_avg.result(),
+                  epoch_xcov_loss_avg.result()))
 
-z_test_list = []
-for batch, (batch_x, batch_y) in enumerate(test_dataset):
-    z_test_list.extend(encoder(batch_x)[0].numpy())
-z_test = np.asarray(z_test_list)
+acc_fn = tf.keras.metrics.CategoricalAccuracy()
 
+z_test, observed_test = encoder(x_test)
+acc_test = acc_fn(tf.one_hot(y_test, n_class), observed_test)
+
+print('Test set accuracy: {:.2f}'.format(100 * acc_test))
+
+# Figure 3a
 plt.figure()
-plt.scatter(z_test[:, 0], z_test[:, 1], alpha=0.1)
+plt.scatter(z_test.numpy()[:, 0], z_test.numpy()[:, 1], alpha=0.1)
 plt.show()
 
+# Figure 3b and c
 ys = np.repeat(np.arange(10), 9).astype('int32')
 zs = np.tile(np.linspace(-0.5, 0.5, 9), 10).astype('float32')
 z1s = np.vstack([zs, np.zeros_like(zs)]).T
