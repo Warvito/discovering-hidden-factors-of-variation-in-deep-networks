@@ -6,5 +6,3 @@ venv/
 
 # Jupyter
 .ipynb_checkpoints/
-
-outputs/
