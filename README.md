@@ -1,5 +1,5 @@
 # Discovering hidden factors of variation in deep networks
-[![MIT license](http://img.shields.io/badge/license-MIT-brightgreen.svg)](http://opensource.org/licenses/MIT)
+[![MIT license](http://img.shields.io/badge/license-MIT-brightgreen.svg)](https://github.com/Warvito/discovering-hidden-factors-of-variation-in-deep-networks/blob/master/LICENSE)
 
  This is a Tensorflow 2.0 implementation of [Discovering hidden factors of variation in deep networks](https://arxiv.org/abs/1412.6583) by [Brian Cheung](https://twitter.com/thisismyhat) et al. (2014). This repository contains reproduce of several experiments mentioned in the paper. Based on the Lasagne (RIP) example ([link](https://github.com/Lasagne/Lasagne/blob/highway_example/examples/Hidden%20factors.ipynb)).
  
